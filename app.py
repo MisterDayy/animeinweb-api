@@ -325,6 +325,65 @@ def search():
     anime_type = request.args.get("type", "").upper()
 
     try:
+        if status or anime_type:
+            # Sebagian besar halaman upstream cuma dikit yang match status/type
+            # tertentu (misal MOVIE bisa 0 di halaman pertama padahal total ada
+            # ratusan). Jadi kalau ada filter ini, kita nyisir beberapa halaman
+            # upstream SEKALIGUS di server (dibatasin biar gak kena timeout
+            # function), baru dibalikin satu batch hasil yang udah lumayan padat.
+            MAX_PAGES_PER_REQUEST = 8  # dijaga kecil biar gak kena timeout function Vercel
+            TARGET_RESULTS = 20
+            start_page = int(page)
+            results = []
+            seen_ids = set()
+            scanned = 0
+            next_page = None
+            reached_end = False
+
+            for i in range(MAX_PAGES_PER_REQUEST):
+                cur_page = start_page + i
+                params = {"keyword": query, "page": str(cur_page), "sort": sort}
+                if genre_in:
+                    params["genre_in"] = genre_in
+                data = api_get("3/2/explore/movie", params)
+                raw = data.get("movie", [])
+                scanned += 1
+
+                if not raw:
+                    reached_end = True
+                    break
+
+                for r in raw:
+                    if status and r.get("status", "").upper() != status:
+                        continue
+                    if anime_type and r.get("type", "").upper() != anime_type:
+                        continue
+                    if r.get("id") not in seen_ids:
+                        seen_ids.add(r.get("id"))
+                        results.append(r)
+
+                if len(results) >= TARGET_RESULTS:
+                    next_page = cur_page + 1
+                    break
+            else:
+                next_page = start_page + MAX_PAGES_PER_REQUEST
+
+            if reached_end:
+                next_page = None
+
+            return jsonify({
+                "query": query,
+                "page": page,
+                "sort": sort,
+                "genreIds": genre_in.split(",") if genre_in else [],
+                "status": status or None,
+                "type": anime_type or None,
+                "note": "status/type filtered locally across multiple upstream pages per request",
+                "pages_scanned": scanned,
+                "next_page": next_page,
+                "results": results,
+            })
+
         params = {"keyword": query, "page": page, "sort": sort}
         if genre_in:
             params["genre_in"] = genre_in
@@ -332,19 +391,15 @@ def search():
         data = api_get("3/2/explore/movie", params)
         results = data.get("movie", [])
 
-        if status:
-            results = [r for r in results if r.get("status", "").upper() == status]
-        if anime_type:
-            results = [r for r in results if r.get("type", "").upper() == anime_type]
-
         return jsonify({
             "query": query,
             "page": page,
             "sort": sort,
             "genreIds": genre_in.split(",") if genre_in else [],
-            "status": status or None,
-            "type": anime_type or None,
-            "note": "status/type filtered locally — upstream API ignores these params",
+            "status": None,
+            "type": None,
+            "note": None,
+            "next_page": (int(page) + 1) if results else None,
             "results": results,
         })
     except Exception as e:

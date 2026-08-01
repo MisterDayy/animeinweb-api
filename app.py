@@ -181,7 +181,7 @@ DOCS_HTML = """<!DOCTYPE html>
 <h2>&gt; homepage</h2>
 <div class="endpoint">
   <span class="method">GET</span><span class="path">/api/homepage</span>
-  <div class="desc">Hot / new / today / popular / trailer / random anime sections.</div>
+  <div class="desc">Hot / new / today / popular / trailer / random / waiting / slider anime sections.</div>
   <div class="try-row">
     <button onclick="tryIt('/api/homepage', this)">run</button>
   </div>
@@ -300,6 +300,8 @@ def homepage():
             "popular": data.get("popular", []),
             "trailer": data.get("trailer", []),
             "random": data.get("random", []),
+            "waiting": data.get("waiting", []),
+            "slider": data.get("slider", []),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

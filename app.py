@@ -292,7 +292,11 @@ def health():
 @app.route("/api/homepage")
 def homepage():
     try:
-        data = api_get("3/2/home/data")
+        # Upstream default cuma ngasih 3 item per section kalau gak dikasih limit.
+        # Kita naikin ke 10 biar preview di Home lebih keisi (ketemu empiris, bukan
+        # didokumentasiin resmi — kalau upstream berubah perilaku, ini yang dicek duluan).
+        limit = request.args.get("limit", "10")
+        data = api_get("3/2/home/data", params={"limit": limit})
         return jsonify({
             "hot": data.get("hot", []),
             "new": data.get("new", []),

@@ -39,9 +39,9 @@ DAY_MAP = {
 }
 
 
-def api_get(endpoint, params=None):
+def api_get(endpoint, params=None, timeout=None):
     url = f"{BASE_URL}{endpoint}"
-    resp = requests.get(url, headers=HEADERS, params=params or {}, timeout=REQUEST_TIMEOUT)
+    resp = requests.get(url, headers=HEADERS, params=params or {}, timeout=timeout or REQUEST_TIMEOUT)
     resp.raise_for_status()
     payload = resp.json()
     if payload and payload.get("status") == 200 and not payload.get("error"):
@@ -331,8 +331,11 @@ def search():
             # ratusan). Jadi kalau ada filter ini, kita nyisir beberapa halaman
             # upstream SEKALIGUS di server (dibatasin biar gak kena timeout
             # function), baru dibalikin satu batch hasil yang udah lumayan padat.
-            MAX_PAGES_PER_REQUEST = 8  # dijaga kecil biar gak kena timeout function Vercel
+            MAX_PAGES_PER_REQUEST = 4  # diturunin dari 8 — riwayat gagal-muat dicurigai
+            # gara-gara ini nyeret function ngelewatin timeout Vercel
             TARGET_RESULTS = 20
+            LOOP_TIMEOUT = 3.5  # worst-case 4 x 3.5s = 14s kalau semua lambat — masih
+            # bisa kena limit 10s default Vercel Hobby, tapi kemungkinan lebih kecil
             start_page = int(page)
             results = []
             seen_ids = set()
@@ -345,7 +348,14 @@ def search():
                 params = {"keyword": query, "page": str(cur_page), "sort": sort}
                 if genre_in:
                     params["genre_in"] = genre_in
-                data = api_get("3/2/explore/movie", params)
+                try:
+                    data = api_get("3/2/explore/movie", params, timeout=LOOP_TIMEOUT)
+                except Exception:
+                    # 1 halaman gagal/lambat gak boleh nggagalin seluruh request —
+                    # stop di sini, balikin apa yang udah kekumpul (kalau ada), dan
+                    # biarin next_page = halaman ini biar dicoba ulang nanti.
+                    next_page = cur_page
+                    break
                 raw = data.get("movie", [])
                 scanned += 1
 
@@ -421,7 +431,9 @@ def anime_details(anime_id):
 @app.route("/api/anime/<anime_id>/episodes")
 def episodes(anime_id):
     try:
-        data = api_get(f"3/2/movie/episode/{anime_id}")
+        page = request.args.get("page")
+        params = {"page": page} if page else None
+        data = api_get(f"3/2/movie/episode/{anime_id}", params)
         return jsonify(data.get("episode", []))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
